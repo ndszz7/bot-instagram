@@ -42,8 +42,14 @@ bot.on('message', async (msg) => {
     // Se for no seu PC (Windows), aponta para a pasta atual onde estão os arquivos .exe
     ffmpegLocationCmd = `--ffmpeg-location "${__dirname}"`;
   } else {
-    // Se for no Render (Linux), ele usa o comando global do sistema
-    ffmpegLocationCmd = '';
+    // Se for no Render (Linux), ele localiza dinamicamente o pacote 'ffmpeg-static'
+    try {
+      const ffmpegStatic = require('ffmpeg-static');
+      ffmpegLocationCmd = `--ffmpeg-location "${path.dirname(ffmpegStatic)}"`;
+    } catch (e) {
+      console.log("⚠️ Avançando sem ffmpeg-static específico, tentando global...");
+      ffmpegLocationCmd = '';
+    }
   }
 
   // Parâmetros de conversão universal para rodar liso no celular
