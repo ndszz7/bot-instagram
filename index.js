@@ -29,7 +29,7 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  const loading = await bot.sendMessage(chatId, '📥 Baixando vídeo...');
+  const loading = await bot.sendMessage(chatId, '📥 Baixando e convertendo vídeo para Full HD 1080p...');
   const downloadsDir = path.join(__dirname, 'downloads');
   if (!fs.existsSync(downloadsDir)) fs.mkdirSync(downloadsDir);
 
@@ -52,8 +52,8 @@ bot.on('message', async (msg) => {
     }
   }
 
-  // ESTRATÉGIA LEVE: Busca formatos pré-comprimidos em MP4/M4A para não travar no celular e nem estourar a RAM do Render
-  const lightFormat = '-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4';
+  // ESTRATÉGIA 1080P LIGHT: Força o teto de 1080p e converte via H.264 usando preset 'ultrafast' para economizar a RAM do Render
+  const lightFormat = '-f "bestvideo[height<=1080]+bestaudio/best" --merge-output-format mp4 --recode-video mp4 --postprocessor-args "ffmpeg:-vcodec libx264 -preset ultrafast -pix_fmt yuv420p -acodec aac"';
     
   let command = '';
   if (isInstagram) {
@@ -70,7 +70,7 @@ bot.on('message', async (msg) => {
     command = `yt-dlp ${ffmpegLocationCmd} ${lightFormat} --no-playlist --force-overwrites -o "${fileName}" "${text}"`;
   }
 
-  console.log("\n⏳ Iniciando download estável do link enviado...");
+  console.log("\n⏳ Iniciando download e conversão 1080p do link enviado...");
 
   exec(command, async (error, stdout, stderr) => {
     console.log("📄 SAÍDA DO TERMINAL:\n", stdout);
@@ -78,7 +78,7 @@ bot.on('message', async (msg) => {
 
     if (error) {
       console.log("❌ ERRO CRÍTICO NO PROCESSO:\n", error);
-      bot.editMessageText('❌ Erro ao baixar vídeo.', { chat_id: chatId, message_id: loading.message_id });
+      bot.editMessageText('❌ Erro ao baixar vídeo. O link pode ser privado ou instável.', { chat_id: chatId, message_id: loading.message_id });
       if (fs.existsSync(fileName)) fs.unlinkSync(fileName);
       return;
     }
@@ -89,10 +89,10 @@ bot.on('message', async (msg) => {
         return;
       }
 
-      await bot.editMessageText('🚀 Enviando vídeo...', { chat_id: chatId, message_id: loading.message_id });
+      await bot.editMessageText('🚀 Enviando vídeo em Full HD...', { chat_id: chatId, message_id: loading.message_id });
 
       await bot.sendVideo(chatId, fileName, {
-        caption: '✅ Vídeo baixado!',
+        caption: '✅ Vídeo baixado em 1080p!',
         supports_streaming: true
       });
 
@@ -102,7 +102,7 @@ bot.on('message', async (msg) => {
     } finally {
       if (fs.existsSync(fileName)) {
         fs.unlinkSync(fileName);
-        console.log("🗑️ Arquivo temporário deletado com sucesso.");
+        console.log("🗑️ Arquivo temporário deletado com sucesso do servidor.");
       }
     }
   });
