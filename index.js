@@ -1,5 +1,6 @@
+
 const TelegramBot = require('node-telegram-bot-api');
-const { exec } = require('child_process');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
@@ -29,84 +30,91 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  const loading = await bot.sendMessage(chatId, '📥 Processando link em Full HD 1080p...');
+  const loading = await bot.sendMessage(chatId, '📥 Processando link em Full HD 1080p (Pode levar de 1 a 2 minutos)...');
   const downloadsDir = path.join(__dirname, 'downloads');
   if (!fs.existsSync(downloadsDir)) fs.mkdirSync(downloadsDir);
 
   const fileName = path.join(downloadsDir, `video_${Date.now()}.mp4`);
   const localCookies = path.join(__dirname, 'cookies.txt');
 
-  let ffmpegLocationCmd = '';
+  let ffmpegPath = '';
   if (process.platform === 'win32') {
-    ffmpegLocationCmd = `--ffmpeg-location "${__dirname}"`;
+    ffmpegPath = __dirname;
   } else {
     try {
       const ffmpegStatic = require('ffmpeg-static');
-      ffmpegLocationCmd = `--ffmpeg-location "${path.dirname(ffmpegStatic)}"`;
+      ffmpegPath = path.dirname(ffmpegStatic);
     } catch (e) {
-      ffmpegLocationCmd = '';
+      ffmpegPath = '';
     }
   }
 
-  // Fingir ser um navegador real para o Instagram não bloquear e liberar 1080p
-  const userAgent = '--user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"';
+  // Desmembrando os argumentos do yt-dlp de forma segura para o Spawn
+  const args = [
+    '-f', 'bestvideo+bestaudio/best',
+    '--merge-output-format', 'mp4',
+    '--recode-video', 'mp4',
+    '--postprocessor-args', 'ffmpeg:-vcodec libx264 -preset ultrafast -pix_fmt yuv420p -acodec aac',
+    '--no-playlist',
+    '--force-overwrites',
+    '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    '-o', fileName
+  ];
 
-  // CONFIGURAÇÃO ULTRAFAST 1080P
-  const forceMaxFormat = '-f "bestvideo+bestaudio/best" --merge-output-format mp4 --recode-video mp4 --postprocessor-args "ffmpeg:-vcodec libx264 -preset ultrafast -pix_fmt yuv420p -acodec aac"';
-    
-  let command = '';
-  let fallbackCommand = `yt-dlp ${ffmpegLocationCmd} ${userAgent} ${forceMaxFormat} --no-playlist --force-overwrites -o "${fileName}" "${text.split('?')[0]}"`;
-
-  if (isInstagram) {
-    const cleanUrl = text.split('?')[0];
-    if (fs.existsSync(localCookies)) {
-      command = `yt-dlp ${ffmpegLocationCmd} --cookies "${localCookies}" ${userAgent} ${forceMaxFormat} --no-playlist --force-overwrites -o "${fileName}" "${cleanUrl}"`;
-    } else {
-      command = fallbackCommand;
-    }
-  } else {
-    command = `yt-dlp ${ffmpegLocationCmd} ${userAgent} ${forceMaxFormat} --no-playlist --force-overwrites -o "${fileName}" "${text}"`;
+  if (ffmpegPath) {
+    args.push('--ffmpeg-location', ffmpegPath);
   }
 
-  console.log("\n⏳ Tentando download...");
+  // Se houver cookies corretos, injeta no comando
+  if (isInstagram && fs.existsSync(localCookies)) {
+    args.push('--cookies', localCookies);
+  }
 
-  const runDownload = (cmd, isFallback = false) => {
-    exec(cmd, async (error, stdout, stderr) => {
-      if (error) {
-        console.log(`❌ Erro no comando (Fallback: ${isFallback}):`, error);
-        
-        if (!isFallback && isInstagram && fs.existsSync(localCookies)) {
-          console.log("⚠️ Comando com cookies falhou. Tentando modo público com User-Agent...");
-          runDownload(fallbackCommand, true);
-          return;
-        }
+  // Adiciona a URL no final dos argumentos
+  const cleanUrl = text.split('?')[0];
+  args.push(cleanUrl);
 
-        bot.editMessageText('❌ Erro ao processar este vídeo em 1080p. O link pode ser privado ou o Instagram bloqueou.', { chat_id: chatId, message_id: loading.message_id });
-        if (fs.existsSync(fileName)) fs.unlinkSync(fileName);
+  console.log("\n⏳ Iniciando download via Stream (Spawn)...");
+
+  // Dispara o yt-dlp de forma segura
+  const child = spawn('yt-dlp', args);
+
+  // Monitora a saída em tempo real (impede o congelamento por estouro de buffer)
+  child.stdout.on('data', (data) => {
+    console.log(`[yt-dlp]: ${data.toString().trim()}`);
+  });
+
+  child.stderr.on('data', (data) => {
+    console.log(`[yt-dlp-warning]: ${data.toString().trim()}`);
+  });
+
+  child.on('close', async (code) => {
+    console.log(`Processo finalizado com código: ${code}`);
+
+    if (code !== 0) {
+      bot.editMessageText('❌ Erro ao baixar o vídeo em 1080p. O link pode ser privado ou os cookies expiraram.', { chat_id: chatId, message_id: loading.message_id });
+      if (fs.existsSync(fileName)) fs.unlinkSync(fileName);
+      return;
+    }
+
+    try {
+      if (!fs.existsSync(fileName)) {
+        bot.editMessageText('❌ Erro: Arquivo final não encontrado.', { chat_id: chatId, message_id: loading.message_id });
         return;
       }
 
-      try {
-        if (!fs.existsSync(fileName)) {
-          bot.editMessageText('❌ Erro: Arquivo final não gerado.', { chat_id: chatId, message_id: loading.message_id });
-          return;
-        }
+      await bot.editMessageText('🚀 Enviando vídeo em Full HD...', { chat_id: chatId, message_id: loading.message_id });
 
-        await bot.editMessageText('🚀 Enviando vídeo em Full HD...', { chat_id: chatId, message_id: loading.message_id });
+      await bot.sendVideo(chatId, fileName, {
+        caption: '✅ Baixado em Full HD 1080p!',
+        supports_streaming: true
+      });
 
-        await bot.sendVideo(chatId, fileName, {
-          caption: '✅ Baixado em Full HD 1080p!',
-          supports_streaming: true
-        });
-
-      } catch (err) {
-        console.log("❌ Erro no envio do Telegram:", err);
-        bot.sendMessage(chatId, '❌ Erro ao enviar o arquivo de vídeo.');
-      } finally {
-        if (fs.existsSync(fileName)) fs.unlinkSync(fileName);
-      }
-    });
-  };
-
-  runDownload(command);
+    } catch (err) {
+      console.log("❌ Erro no envio do Telegram:", err);
+      bot.sendMessage(chatId, '❌ Erro ao enviar o arquivo de vídeo.');
+    } finally {
+      if (fs.existsSync(fileName)) fs.unlinkSync(fileName);
+    }
+  });
 });
