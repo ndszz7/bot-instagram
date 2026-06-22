@@ -52,9 +52,9 @@ bot.on('message', async (msg) => {
     }
   }
 
-  // Parâmetros de conversão universal para rodar liso no celular
-  const forceMobileFormat = '--recode-video mp4 --postprocessor-args "ffmpeg:-vcodec libx264 -pix_fmt yuv420p -profile:v main -level 3.1 -acodec aac"';
-
+// Versão ultra leve: junta os formatos sem forçar reencodamento pesado
+const forceMobileFormat = '--merge-output-format mp4';
+  
   let command = '';
   if (isInstagram) {
     const cleanUrl = text.split('?')[0];
