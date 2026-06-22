@@ -4,13 +4,14 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 
-// SERVIDOR WEB (Necessário para plataformas de hospedagem)
+// SERVIDOR WEB (O Render exige que essa porta responda para não dar erro de Timeout)
 const app = express();
+const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('BOT ONLINE'));
-app.listen(process.env.PORT || 3000, () => console.log('🌐 Web server online'));
+app.listen(PORT, () => console.log(`🌐 Web server online na porta ${PORT}`));
 
-// TOKEN DO TELEGRAM
-const token = '8910812106:AAG-eNClV2rJTbimoAObi8kxWZhmTwrFVpI';
+// TOKEN DO TELEGRAM (Pegando das variáveis de ambiente na nuvem ou usando o seu local)
+const token = process.env.TELEGRAM_TOKEN || '8910812106:AAG-eNClV2rJTbimoAObi8kxWZhmTwrFVpI'; 
 const bot = new TelegramBot(token, { polling: true });
 
 console.log('🤖 Bot online...');
@@ -20,7 +21,6 @@ bot.on('message', async (msg) => {
   const text = msg.text ? msg.text.trim() : '';
   if (!text) return;
 
-  // IDENTIFICAÇÃO DOS LINKS
   const isTikTok = text.includes('tiktok.com') || text.includes('vm.tiktok.com') || text.includes('vt.tiktok.com');
   const isInstagram = text.includes('instagram.com');
 
@@ -36,64 +36,68 @@ bot.on('message', async (msg) => {
   const fileName = path.join(downloadsDir, `video_${Date.now()}.mp4`);
   const localCookies = path.join(__dirname, 'cookies.txt');
 
-  // Aponta para a pasta do bot onde estão os arquivos ffmpeg.exe e ffprobe.exe
-  const ffmpegPath = __dirname;
+  // CONFIGURAÇÃO DO FFMPEG INTELIGENTE (Detecta se está no Windows ou Linux/Render)
+  let ffmpegLocationCmd = '';
+  if (process.platform === 'win32') {
+    // Se for no seu PC (Windows), aponta para a pasta atual onde estão os arquivos .exe
+    ffmpegLocationCmd = `--ffmpeg-location "${__dirname}"`;
+  } else {
+    // Se for no Render (Linux), ele usa o comando global do sistema
+    ffmpegLocationCmd = '';
+  }
 
-  // Parâmetros robustos que forçam o FFmpeg a converter o vídeo para H.264 padrão (Universal para celulares)
+  // Parâmetros de conversão universal para rodar liso no celular
   const forceMobileFormat = '--recode-video mp4 --postprocessor-args "ffmpeg:-vcodec libx264 -pix_fmt yuv420p -profile:v main -level 3.1 -acodec aac"';
 
   let command = '';
   if (isInstagram) {
     const cleanUrl = text.split('?')[0];
-    command = `yt-dlp --ffmpeg-location "${ffmpegPath}" --cookies "${localCookies}" -f "bestvideo+bestaudio/best" ${forceMobileFormat} --no-playlist --force-overwrites -o "${fileName}" "${cleanUrl}"`;
+    
+    // Verifica se os cookies existem (Local ou injetados na nuvem)
+    if (fs.existsSync(localCookies)) {
+      command = `yt-dlp ${ffmpegLocationCmd} --cookies "${localCookies}" -f "bestvideo+bestaudio/best" ${forceMobileFormat} --no-playlist --force-overwrites -o "${fileName}" "${cleanUrl}"`;
+    } else {
+      // Se não achar o arquivo cookies.txt, tenta baixar de forma pública (pode falhar em alguns reels privados)
+      command = `yt-dlp ${ffmpegLocationCmd} -f "bestvideo+bestaudio/best" ${forceMobileFormat} --no-playlist --force-overwrites -o "${fileName}" "${cleanUrl}"`;
+    }
   } else {
-    command = `yt-dlp --ffmpeg-location "${ffmpegPath}" -f "bestvideo+bestaudio/best" ${forceMobileFormat} --no-playlist --force-overwrites -o "${fileName}" "${text}"`;
+    command = `yt-dlp ${ffmpegLocationCmd} -f "bestvideo+bestaudio/best" ${forceMobileFormat} --no-playlist --force-overwrites -o "${fileName}" "${text}"`;
   }
 
   console.log("\n⏳ Iniciando download e conversão do link enviado...");
 
-  // EXECUTA O YT-DLP
   exec(command, async (error, stdout, stderr) => {
-    console.log("📄 SAÍDA DO TERMINAL (stdout):\n", stdout);
-    if (stderr) console.log("⚠️ AVISOS/ERROS DO TERMINAL (stderr):\n", stderr);
+    console.log("📄 SAÍDA DO TERMINAL:\n", stdout);
+    if (stderr) console.log("⚠️ AVISOS DO TERMINAL:\n", stderr);
 
     if (error) {
       console.log("❌ ERRO CRÍTICO NO PROCESSO:\n", error);
-      bot.editMessageText('❌ Erro ao baixar vídeo. Verifique o terminal.', {
-        chat_id: chatId,
-        message_id: loading.message_id
-      });
+      bot.editMessageText('❌ Erro ao baixar vídeo.', { chat_id: chatId, message_id: loading.message_id });
+      if (fs.existsSync(fileName)) fs.unlinkSync(fileName);
       return;
     }
 
     try {
-      // VALIDA SE O ARQUIVO REALMENTE FOI GERADO
       if (!fs.existsSync(fileName)) {
-        bot.editMessageText('❌ Arquivo não encontrado após o download.', {
-          chat_id: chatId,
-          message_id: loading.message_id
-        });
+        bot.editMessageText('❌ Arquivo não encontrado após o download.', { chat_id: chatId, message_id: loading.message_id });
         return;
       }
 
-      await bot.editMessageText('🚀 Enviando vídeo...', {
-        chat_id: chatId,
-        message_id: loading.message_id
-      });
+      await bot.editMessageText('🚀 Enviando vídeo...', { chat_id: chatId, message_id: loading.message_id });
 
-      // ENVIA PARA O TELEGRAM
       await bot.sendVideo(chatId, fileName, {
         caption: '✅ Vídeo baixado em HD',
         supports_streaming: true
       });
 
-      // REMOVE O ARQUIVO DO DISCO LOCAL
-      fs.unlinkSync(fileName);
-      console.log("📌 Vídeo enviado e arquivo temporário excluído com sucesso.");
-
     } catch (err) {
-      console.log("❌ Erro no bloco de envio:", err);
+      console.log("❌ Erro no envio:", err);
       bot.sendMessage(chatId, '❌ Erro ao enviar arquivo de vídeo.');
+    } finally {
+      if (fs.existsSync(fileName)) {
+        fs.unlinkSync(fileName);
+        console.log("🗑️ Arquivo temporário deletado com sucesso.");
+      }
     }
   });
 });
