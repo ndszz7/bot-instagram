@@ -29,7 +29,7 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  const loading = await bot.sendMessage(chatId, '📥 Baixando e convertendo vídeo para celular...');
+  const loading = await bot.sendMessage(chatId, '📥 Baixando vídeo...');
   const downloadsDir = path.join(__dirname, 'downloads');
   if (!fs.existsSync(downloadsDir)) fs.mkdirSync(downloadsDir);
 
@@ -52,25 +52,25 @@ bot.on('message', async (msg) => {
     }
   }
 
-// Versão ultra leve: junta os formatos sem forçar reencodamento pesado
-const forceMobileFormat = '--merge-output-format mp4';
-  
+  // ESTRATÉGIA LEVE: Busca formatos pré-comprimidos em MP4/M4A para não travar no celular e nem estourar a RAM do Render
+  const lightFormat = '-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4';
+    
   let command = '';
   if (isInstagram) {
     const cleanUrl = text.split('?')[0];
     
     // Verifica se os cookies existem (Local ou injetados na nuvem)
     if (fs.existsSync(localCookies)) {
-      command = `yt-dlp ${ffmpegLocationCmd} --cookies "${localCookies}" -f "bestvideo+bestaudio/best" ${forceMobileFormat} --no-playlist --force-overwrites -o "${fileName}" "${cleanUrl}"`;
+      command = `yt-dlp ${ffmpegLocationCmd} --cookies "${localCookies}" ${lightFormat} --no-playlist --force-overwrites -o "${fileName}" "${cleanUrl}"`;
     } else {
-      // Se não achar o arquivo cookies.txt, tenta baixar de forma pública (pode falhar em alguns reels privados)
-      command = `yt-dlp ${ffmpegLocationCmd} -f "bestvideo+bestaudio/best" ${forceMobileFormat} --no-playlist --force-overwrites -o "${fileName}" "${cleanUrl}"`;
+      // Se não achar o arquivo cookies.txt, tenta baixar de forma pública
+      command = `yt-dlp ${ffmpegLocationCmd} ${lightFormat} --no-playlist --force-overwrites -o "${fileName}" "${cleanUrl}"`;
     }
   } else {
-    command = `yt-dlp ${ffmpegLocationCmd} -f "bestvideo+bestaudio/best" ${forceMobileFormat} --no-playlist --force-overwrites -o "${fileName}" "${text}"`;
+    command = `yt-dlp ${ffmpegLocationCmd} ${lightFormat} --no-playlist --force-overwrites -o "${fileName}" "${text}"`;
   }
 
-  console.log("\n⏳ Iniciando download e conversão do link enviado...");
+  console.log("\n⏳ Iniciando download estável do link enviado...");
 
   exec(command, async (error, stdout, stderr) => {
     console.log("📄 SAÍDA DO TERMINAL:\n", stdout);
@@ -92,7 +92,7 @@ const forceMobileFormat = '--merge-output-format mp4';
       await bot.editMessageText('🚀 Enviando vídeo...', { chat_id: chatId, message_id: loading.message_id });
 
       await bot.sendVideo(chatId, fileName, {
-        caption: '✅ Vídeo baixado em HD',
+        caption: '✅ Vídeo baixado!',
         supports_streaming: true
       });
 
