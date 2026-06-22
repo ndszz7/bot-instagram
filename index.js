@@ -29,7 +29,7 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  const loading = await bot.sendMessage(chatId, '📥 Processando link em alta qualidade...');
+  const loading = await bot.sendMessage(chatId, '📥 Processando link em Full HD 1080p...');
   const downloadsDir = path.join(__dirname, 'downloads');
   if (!fs.existsSync(downloadsDir)) fs.mkdirSync(downloadsDir);
 
@@ -48,41 +48,40 @@ bot.on('message', async (msg) => {
     }
   }
 
+  // Fingir ser um navegador real para o Instagram não bloquear e liberar 1080p
+  const userAgent = '--user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"';
+
   // CONFIGURAÇÃO ULTRAFAST 1080P
   const forceMaxFormat = '-f "bestvideo+bestaudio/best" --merge-output-format mp4 --recode-video mp4 --postprocessor-args "ffmpeg:-vcodec libx264 -preset ultrafast -pix_fmt yuv420p -acodec aac"';
     
   let command = '';
-  let fallbackCommand = `yt-dlp ${ffmpegLocationCmd} ${forceMaxFormat} --no-playlist --force-overwrites -o "${fileName}" "${text.split('?')[0]}"`;
+  let fallbackCommand = `yt-dlp ${ffmpegLocationCmd} ${userAgent} ${forceMaxFormat} --no-playlist --force-overwrites -o "${fileName}" "${text.split('?')[0]}"`;
 
   if (isInstagram) {
     const cleanUrl = text.split('?')[0];
     if (fs.existsSync(localCookies)) {
-      command = `yt-dlp ${ffmpegLocationCmd} --cookies "${localCookies}" ${forceMaxFormat} --no-playlist --force-overwrites -o "${fileName}" "${cleanUrl}"`;
+      command = `yt-dlp ${ffmpegLocationCmd} --cookies "${localCookies}" ${userAgent} ${forceMaxFormat} --no-playlist --force-overwrites -o "${fileName}" "${cleanUrl}"`;
     } else {
       command = fallbackCommand;
     }
   } else {
-    command = `yt-dlp ${ffmpegLocationCmd} ${forceMaxFormat} --no-playlist --force-overwrites -o "${fileName}" "${text}"`;
+    command = `yt-dlp ${ffmpegLocationCmd} ${userAgent} ${forceMaxFormat} --no-playlist --force-overwrites -o "${fileName}" "${text}"`;
   }
 
   console.log("\n⏳ Tentando download...");
 
-  // Função auxiliar para rodar o comando do terminal
   const runDownload = (cmd, isFallback = false) => {
     exec(cmd, async (error, stdout, stderr) => {
-      console.log(stdout);
-
       if (error) {
         console.log(`❌ Erro no comando (Fallback: ${isFallback}):`, error);
         
-        // Se deu erro usando cookies, tenta imediatamente SEM cookies antes de desistir
         if (!isFallback && isInstagram && fs.existsSync(localCookies)) {
-          console.log("⚠️ Comando com cookies falhou. Tentando modo público de segurança...");
+          console.log("⚠️ Comando com cookies falhou. Tentando modo público com User-Agent...");
           runDownload(fallbackCommand, true);
           return;
         }
 
-        bot.editMessageText('❌ Erro ao processar este vídeo. O link pode estar quebrado.', { chat_id: chatId, message_id: loading.message_id });
+        bot.editMessageText('❌ Erro ao processar este vídeo em 1080p. O link pode ser privado ou o Instagram bloqueou.', { chat_id: chatId, message_id: loading.message_id });
         if (fs.existsSync(fileName)) fs.unlinkSync(fileName);
         return;
       }
@@ -93,10 +92,10 @@ bot.on('message', async (msg) => {
           return;
         }
 
-        await bot.editMessageText('🚀 Enviando vídeo de alta qualidade...', { chat_id: chatId, message_id: loading.message_id });
+        await bot.editMessageText('🚀 Enviando vídeo em Full HD...', { chat_id: chatId, message_id: loading.message_id });
 
         await bot.sendVideo(chatId, fileName, {
-          caption: '✅ Baixado com sucesso!',
+          caption: '✅ Baixado em Full HD 1080p!',
           supports_streaming: true
         });
 
@@ -109,6 +108,5 @@ bot.on('message', async (msg) => {
     });
   };
 
-  // Inicia a primeira tentativa
   runDownload(command);
 });
